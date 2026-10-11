@@ -1,0 +1,188 @@
+/* Accessibility contract: pure black, white/#FFD700 only, everything
+   inside the middle 70% of the screen (tunnel vision — no edge content),
+   opacity-only transitions >= 500ms, no motion. */
+
+* { margin: 0; padding: 0; box-sizing: border-box; border: 0; font: inherit; }
+
+html, body { height: 100%; background: #000; overflow: hidden; }
+
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-weight: 700;
+  color: #fff;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+/* 15vh/15vw padding keeps all content out of the outer 15% of every edge */
+#app { position: fixed; inset: 0; background: #000; padding: 15vh 15vw; }
+
+.stage {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3vmin;
+  opacity: 1;
+  transition: opacity 0.6s ease;
+}
+
+.grow, .tap-all {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 3vmin;
+  text-align: center;
+}
+
+.tap-all { cursor: pointer; }
+
+.title    { font-size: clamp(3rem, 18vmin, 8rem);    font-weight: 800; line-height: 1.1; }
+.title-sm { font-size: clamp(2.2rem, 12vmin, 6rem);  font-weight: 800; line-height: 1.15; }
+.sub      { font-size: clamp(1.6rem, 8vmin, 3.5rem); line-height: 1.25; }
+.accent   { color: #FFD700; }
+
+.count {
+  font-size: clamp(6rem, 36vmin, 20rem);
+  font-weight: 800;
+  color: #FFD700;
+  line-height: 1;
+}
+
+.btn {
+  flex: 1;
+  width: 100%;
+  background: #000;
+  color: #FFD700;
+  border: 1vmin solid #FFD700;
+  border-radius: 5vmin;
+  font-size: clamp(2rem, 11vmin, 5rem);
+  font-weight: 800;
+  line-height: 1.15;
+  cursor: pointer;
+}
+
+.btn:active { background: #FFD700; color: #000; }
+
+.done-btn { flex: 0 0 24%; }
+
+.btn-row { display: flex; gap: 3vmin; flex: 0 0 12%; }
+
+.row-btn {
+  flex: 1;
+  font-size: clamp(1.2rem, 5vmin, 2.5rem);
+  border-width: 0.6vmin;
+  color: #fff;
+  border-color: #fff;
+}
+
+/* deploy indicator for Ambar only — tiny and dim on purpose */
+#version {
+  position: fixed;
+  right: 6px;
+  bottom: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #444;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: 10;
+  padding: 15vh 15vw;
+  display: flex;
+  flex-direction: column;
+  gap: 4vmin;
+}
+
+.milestone-photo {
+  max-width: 70%;
+  max-height: 45vh;
+  object-fit: contain;
+  border-radius: 2vmin;
+}
+
+/* Trail/welcome screen: photo is one of four elements so constrained smaller */
+.trail-photo {
+  max-width: 80%;
+  max-height: 35vh;
+  object-fit: contain;
+  border-radius: 2vmin;
+}
+
+/* Splash screen — Ambar's love note */
+.splash-msg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2vmin;
+  text-align: center;
+}
+.splash-lg {
+  font-size: clamp(2.5rem, 13vmin, 6rem);
+  font-weight: 900;
+  color: #FFD700;
+  line-height: 1.1;
+}
+.splash-md {
+  font-size: clamp(1.6rem, 8vmin, 3.5rem);
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.25;
+}
+.splash-sm {
+  font-size: clamp(1rem, 5vmin, 2.2rem);
+  font-weight: 400;
+  color: #aaa;
+  font-style: italic;
+}
+
+/* Photo story screen — title + photo + caption */
+.story-title {
+  font-size: clamp(1.6rem, 8vmin, 3.5rem);
+  font-weight: 800;
+  color: #FFD700;
+  line-height: 1.2;
+  text-align: center;
+}
+.story-caption {
+  font-size: clamp(1rem, 5vmin, 2rem);
+  font-weight: 400;
+  color: #fff;
+  font-style: italic;
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* 30th-session gift screen */
+.gift-box {
+  font-size: clamp(5rem, 30vmin, 12rem);
+  line-height: 1;
+  cursor: pointer;
+}
+.gift-reveal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2vmin;
+  text-align: center;
+}
+
+/* Explicit old-school blink so Dad never stares at the screen forever */
+.tap-prompt {
+  font-size: clamp(1rem, 4.5vmin, 2rem);
+  color: #FFD700;
+  letter-spacing: 0.12em;
+  animation: tap-blink 0.9s step-end infinite;
+  margin-top: 3vmin;
+}
+@keyframes tap-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
