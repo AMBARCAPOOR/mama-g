@@ -71,3 +71,12 @@ Edit the `MILESTONES` array in app.js to change captions.
 
 Record .mp3 files, drop in `assets/voice/`, reference them in app.js similar to
 DaddyKool's WELCOME_VOICE / MID_VOICE / COMPLETION_VOICE pattern.
+
+## v2 rebuild (knee-safe, belly-focused, floor ladder)
+
+- Session = 2 warm-up + 1 floor-ladder stage + 7 body (cardio/core/strength/balance per flavor `mix`) + cooldown (~11 exercises).
+- Removed risky moves: lunges, step-ups, wall-sit, kneeling drills, stagger steps, old FR* floor drills.
+- Floor ladder L1-L7 (chair -> bed -> mat). `mg_floor` = {stage, streak}. 3 EASY/JUST RIGHT in a row = next stage; TOO HARD/KNEE HURT = back one.
+- First run shows 4 safety cards (`mg_safety`); each session ends with a rotating BELLY TIP.
+- Voice clips: `node tools/make_manifest.js && python tools/gen_tts.py` (reads text from app.js).
+- Not yet browser-verified end to end; test with `?fast` (pane pauses rAF, shim it).

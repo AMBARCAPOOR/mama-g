@@ -2,14 +2,14 @@
 
 // ---------------------------------------------------------------- config
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 
 const JAYANT_NAME = 'JAYANT';
 
 const FAST = new URLSearchParams(location.search).has('fast');
 const T = (ms) => (FAST ? Math.max(80, ms / 10) : ms);
 
-const REST_SECONDS = 25;
+const REST_SECONDS = 20;
 const FADE_MS = 600;
 
 const DEFAULT_REP_SECONDS = 3;
@@ -82,6 +82,8 @@ const audio = (() => {
 
 const progressCache = {};
 let trailSteps = 0;
+// Floor ladder: which stage (1-7) he is on, and how many good sessions in a row.
+const floorState = { stage: 1, streak: 0 };
 
 function loadLocalState() {
   const t = parseInt(localStorage.getItem('mg_trail'), 10);
@@ -90,41 +92,93 @@ function loadLocalState() {
     const p = JSON.parse(localStorage.getItem('mg_progress') || '{}');
     Object.assign(progressCache, p);
   } catch (e) {}
+  try {
+    const f = JSON.parse(localStorage.getItem('mg_floor') || '{}');
+    if (f.stage >= 1 && f.stage <= 7) floorState.stage = f.stage;
+    if (f.streak >= 0) floorState.streak = f.streak;
+  } catch (e) {}
 }
 
 function saveLocalState() {
   try {
     localStorage.setItem('mg_trail', String(trailSteps));
     localStorage.setItem('mg_progress', JSON.stringify(progressCache));
+    localStorage.setItem('mg_floor', JSON.stringify(floorState));
   } catch (e) {}
 }
 
 loadLocalState();
 
 // ---------------------------------------------------------------- exercise bank
-
-const FR_STEPS = [
-  'SIT ON THE EDGE OF THE BED',
-  'LOWER DOWN TO KNEELING. HANDS ON THE BED.',
-  'SIT TO THE SIDE ON THE FLOOR',
-  'LIE DOWN. SLOW AND EASY.',
-  'ROLL ONTO YOUR SIDE',
-  'PRESS UP TO SITTING',
-  'COME UP TO KNEELING. HANDS ON THE BED.',
-  'STRONG FOOT FLAT ON THE FLOOR',
-  'PUSH UP TO STANDING. TAKE YOUR TIME.',
-];
+//
+// v2 design notes (knee-protective, belly-focused, floor-transfer ladder):
+//  - No lunges, step-ups, kneeling drills, wall-sit holds or one-leg-only
+//    loading in the random pools. Squat-pattern moves are shallow + supported.
+//  - Floor-transfer work is a 7-stage LADDER (L1..L7) that goes from a chair
+//    to the floor in small steps, one stage per session, gated by how it felt.
+//  - Cardio + core pools give the calorie burn / trunk work for the belly goal.
 
 const EXERCISES = {
+  // ---- legs: strength (supported, knee-friendly ranges) ----
   STS: {
     name: 'SIT TO STAND', type: 'strength',
     instruction: 'RISE FROM YOUR CHAIR. SIT BACK DOWN SLOWLY.',
+    dose: { reps: 8, repSeconds: 4 },
+  },
+  STSp: {
+    name: 'SIT-STAND WITH PAUSE', type: 'strength',
+    instruction: 'RISE FROM THE CHAIR. PAUSE HALFWAY. THEN RISE ALL THE WAY.',
+    dose: { reps: 6, repSeconds: 5 },
+  },
+  KE: {
+    name: 'KNEE EXTENSIONS', type: 'strength',
+    instruction: 'SIT TALL. STRAIGHTEN ONE KNEE. HOLD, THEN LOWER.',
+    dose: { reps: 10, perSide: true, betweenText: 'OTHER LEG' },
+  },
+  QSQ: {
+    name: 'THIGH SQUEEZES', type: 'strength',
+    instruction: 'SIT TALL, ONE LEG STRAIGHT. TIGHTEN THE TOP OF YOUR THIGH. HOLD, THEN RELAX.',
+    dose: { reps: 8, repSeconds: 5, perSide: true, betweenText: 'OTHER LEG' },
+  },
+  TKE: {
+    name: 'TERMINAL KNEE EXTENSION', type: 'strength',
+    instruction: 'HOLD THE CHAIR BACK. SLIGHT BEND IN YOUR KNEE. SLOWLY STRAIGHTEN IT. SQUEEZE AT THE TOP.',
+    dose: { reps: 10, perSide: true, betweenText: 'OTHER LEG' },
+  },
+  CKS: {
+    name: 'CHAIR KNEE BENDS', type: 'strength',
+    instruction: 'HOLD THE CHAIR BACK. BEND YOUR KNEES JUST A LITTLE, THEN RISE TALL.',
+    dose: { reps: 8, repSeconds: 4 },
+  },
+  PSQ: {
+    name: 'SHALLOW SQUATS', type: 'strength',
+    instruction: 'HOLD THE COUNTER. BEND ONLY AS FAR AS FEELS EASY, THEN BACK UP.',
+    dose: { reps: 6, repSeconds: 4 },
+  },
+  WDS: {
+    name: 'WIDE STANCE SQUAT', type: 'strength',
+    instruction: 'HOLD THE COUNTER. FEET WIDE APART. BEND YOUR KNEES A LITTLE AND RISE.',
+    dose: { reps: 8, repSeconds: 4 },
+  },
+  HB: {
+    name: 'HIP BRIDGES', type: 'strength',
+    instruction: 'LIE ON THE BED, KNEES BENT. LIFT YOUR HIPS UP.',
     dose: { reps: 8 },
+  },
+  CPU: {
+    name: 'CHAIR PRESS-UPS', type: 'strength',
+    instruction: 'SIT TALL, HANDS BESIDE YOU. PRESS DOWN AND LIFT YOUR HIPS A LITTLE.',
+    dose: { reps: 8, repSeconds: 4 },
   },
   HR: {
     name: 'HEEL RAISES', type: 'strength',
     instruction: 'HOLD THE COUNTER. RISE UP ON YOUR TOES. LOWER SLOWLY.',
     dose: { reps: 10 },
+  },
+  SCR: {
+    name: 'SEATED CALF RAISES', type: 'strength',
+    instruction: 'SIT TALL. RISE UP ON YOUR TOES AS HIGH AS YOU CAN. LOWER SLOWLY.',
+    dose: { reps: 12 },
   },
   TR: {
     name: 'TOE RAISES', type: 'strength',
@@ -136,6 +190,134 @@ const EXERCISES = {
     instruction: 'HOLD THE CHAIR BACK. LIFT ONE LEG OUT TO THE SIDE.',
     dose: { reps: 8, perSide: true, betweenText: 'OTHER LEG' },
   },
+  HAB: {
+    name: 'HIP ABDUCTION', type: 'strength',
+    instruction: 'HOLD THE COUNTER. LIFT ONE LEG OUT TO THE SIDE. SLOW AND CONTROLLED.',
+    dose: { reps: 8, perSide: true, betweenText: 'OTHER LEG' },
+  },
+  HE: {
+    name: 'HIP EXTENSION', type: 'strength',
+    instruction: 'HOLD THE COUNTER. GENTLY LIFT ONE LEG BACK. SLOW AND EASY.',
+    dose: { reps: 8, perSide: true, betweenText: 'OTHER LEG' },
+  },
+  RKS: {
+    name: 'REVERSE KNEE LIFTS', type: 'strength',
+    instruction: 'HOLD THE CHAIR BACK. LIFT YOUR HEEL UP BEHIND YOU.',
+    dose: { reps: 8, perSide: true, betweenText: 'OTHER LEG' },
+  },
+
+  // ---- upper body: strength (supports pushing up from the floor) ----
+  WP: {
+    name: 'WALL PUSH-UPS', type: 'strength',
+    instruction: 'HANDS ON THE WALL. LEAN IN, PUSH BACK.',
+    dose: { reps: 8 },
+  },
+  WPU: {
+    name: 'WIDE WALL PUSH-UPS', type: 'strength',
+    instruction: 'HANDS WIDE ON THE WALL. LEAN IN, PUSH BACK.',
+    dose: { reps: 8 },
+  },
+  TPU: {
+    name: 'TABLE PUSH-UPS', type: 'strength',
+    instruction: 'HANDS ON THE TABLE EDGE. LEAN IN, PUSH BACK.',
+    dose: { reps: 6 },
+  },
+  ARC: {
+    name: 'ARM CIRCLES', type: 'strength',
+    instruction: 'HOLD THE CHAIR WITH ONE HAND. CIRCLE THE OTHER ARM SLOWLY.',
+    dose: { reps: 10, repSeconds: 3, perSide: true, betweenText: 'NOW THE OTHER WAY' },
+  },
+  WTW: {
+    name: 'WALL REACHES', type: 'strength',
+    instruction: 'STAND NEAR THE WALL. REACH UP, DOWN, AND OUT TO THE SIDE.',
+    dose: { reps: 8, perSide: true, betweenText: 'CHANGE DIRECTION' },
+  },
+  CRL: {
+    name: 'WALL ROLLS', type: 'strength',
+    instruction: 'HANDS ON THE WALL. ROLL YOUR SHOULDERS AND CHEST SLOWLY.',
+    dose: { reps: 10 },
+  },
+
+  // ---- cardio: low-impact, seated or counter-held, timed ----
+  BRM: {
+    name: 'BRISK MARCH', type: 'cardio',
+    instruction: 'HOLD THE COUNTER. MARCH IN PLACE, QUICK AND LIGHT. BREATHE HARD BUT STAY ABLE TO TALK.',
+    dose: { seconds: 30 },
+  },
+  SBX: {
+    name: 'SEATED BOXING', type: 'cardio',
+    instruction: 'SIT TALL. PUNCH FORWARD, ONE ARM THEN THE OTHER. FAST AND LOOSE.',
+    dose: { seconds: 30 },
+  },
+  SJK: {
+    name: 'SEATED JACKS', type: 'cardio',
+    instruction: 'SIT TALL. ARMS UP AND FEET OUT, THEN ARMS DOWN AND FEET IN.',
+    dose: { seconds: 30 },
+  },
+  SSS: {
+    name: 'SIDE STEPS', type: 'cardio',
+    instruction: 'HOLD THE COUNTER. STEP SIDEWAYS, THEN BACK. KEEP YOUR KNEES SOFT.',
+    dose: { seconds: 30 },
+  },
+  HDG: {
+    name: 'HEEL TAPS', type: 'cardio',
+    instruction: 'HOLD THE COUNTER. TAP ONE HEEL FORWARD, THEN THE OTHER. KEEP A STEADY BEAT.',
+    dose: { seconds: 30 },
+  },
+  SMB: {
+    name: 'SEATED HIGH MARCH', type: 'cardio',
+    instruction: 'SIT TALL. MARCH YOUR KNEES UP AS HIGH AS FEELS GOOD. SLOW AND STEADY.',
+    dose: { seconds: 30 },
+  },
+  HK: {
+    name: 'HIGH-KNEE MARCH', type: 'cardio',
+    instruction: 'HOLD THE COUNTER. MARCH IN PLACE, LIFTING YOUR KNEES AS HIGH AS FEELS GOOD.',
+    dose: { seconds: 30 },
+  },
+  WLK: {
+    name: 'HOUSE WALK', type: 'cardio',
+    instruction: 'WALK BRISKLY THROUGH THE HOUSE, ARMS SWINGING. KEEP A HAND NEAR THE WALLS.',
+    dose: { seconds: 45 },
+  },
+
+  // ---- core: belly work that is safe for the knees and back ----
+  CTP: {
+    name: 'COUNTER PLANK', type: 'core',
+    instruction: 'HANDS ON THE COUNTER EDGE. BODY IN ONE LINE. TIGHTEN YOUR BELLY. KEEP BREATHING.',
+    dose: { seconds: 15 },
+  },
+  BRC: {
+    name: 'BELLY BRACE', type: 'core',
+    instruction: 'SIT TALL. BREATHE OUT AND PULL YOUR BELLY IN. HOLD, THEN RELAX. NEVER HOLD YOUR BREATH.',
+    dose: { reps: 8, repSeconds: 5 },
+  },
+  SEK: {
+    name: 'ELBOW TO KNEE', type: 'core',
+    instruction: 'SIT TALL. BRING ONE ELBOW TOWARD THE OPPOSITE KNEE. TWIST FROM YOUR BELLY.',
+    dose: { reps: 8, perSide: true, betweenText: 'OTHER SIDE' },
+  },
+  SBD: {
+    name: 'STANDING SIDE BEND', type: 'core',
+    instruction: 'HOLD THE COUNTER. REACH THE OTHER ARM OVER YOUR HEAD AND LEAN. SLOWLY.',
+    dose: { reps: 8, perSide: true, betweenText: 'OTHER SIDE' },
+  },
+  SCH: {
+    name: 'SEATED CHOPS', type: 'core',
+    instruction: 'SIT TALL, HANDS CLASPED. SWING FROM HIGH ON ONE SIDE DOWN TO THE OTHER KNEE.',
+    dose: { reps: 8, perSide: true, betweenText: 'OTHER SIDE' },
+  },
+  PTL: {
+    name: 'WALL PELVIC TILT', type: 'core',
+    instruction: 'BACK AGAINST THE WALL. FLATTEN YOUR LOWER BACK TO THE WALL. HOLD, THEN RELEASE.',
+    dose: { reps: 10, repSeconds: 4 },
+  },
+  SKL: {
+    name: 'SEATED KNEE LIFTS', type: 'core',
+    instruction: 'SIT TALL, HANDS ON THE CHAIR. LIFT BOTH KNEES A LITTLE. LOWER SLOWLY.',
+    dose: { reps: 8, repSeconds: 4 },
+  },
+
+  // ---- balance (always at the counter, chair or wall) ----
   MIP: {
     name: 'MARCHING IN PLACE', type: 'balance',
     instruction: 'HOLD THE CHAIR BACK. MARCH IN PLACE, NICE AND EASY.',
@@ -150,86 +332,6 @@ const EXERCISES = {
     name: 'HEEL TO TOE WALK', type: 'balance',
     instruction: 'WALK ALONG THE TABLE, HEEL TOUCHING TOE.',
     dose: { reps: 8, perSide: true, betweenText: 'NOW WALK BACK' },
-  },
-  KE: {
-    name: 'KNEE EXTENSIONS', type: 'strength',
-    instruction: 'SIT TALL. STRAIGHTEN ONE KNEE. HOLD, THEN LOWER.',
-    dose: { reps: 10, perSide: true, betweenText: 'OTHER LEG' },
-  },
-  AC: {
-    name: 'ANKLE CIRCLES', type: 'mobility',
-    instruction: 'SIT TALL. CIRCLE YOUR ANKLES, SLOW AND EASY.',
-    dose: { reps: 10, repSeconds: 3, perSide: true, betweenText: 'OTHER DIRECTION' },
-  },
-  HB: {
-    name: 'HIP BRIDGES', type: 'strength',
-    instruction: 'LIE ON THE BED, KNEES BENT. LIFT YOUR HIPS UP.',
-    dose: { reps: 8 },
-  },
-  WP: {
-    name: 'WALL PUSH-UPS', type: 'strength',
-    instruction: 'HANDS ON THE WALL. LEAN IN, PUSH BACK.',
-    dose: { reps: 8 },
-  },
-  SB: {
-    name: 'EASY BREATHING', type: 'cooldown',
-    instruction: 'SIT TALL. BREATHE SLOW AND DEEP.',
-    dose: { seconds: 60 },
-  },
-  FR: {
-    name: 'GROUND SCHOOL', type: 'skill',
-    instruction: 'YOUR WAY UP FROM THE FLOOR. SLOW AND STEADY. YOU KNOW THIS.',
-    dose: { cycles: 2, stepSeconds: 12, steps: FR_STEPS },
-  },
-  CKS: {
-    name: 'CHAIR KNEE SQUATS', type: 'strength',
-    instruction: 'HOLD THE CHAIR BACK. BEND YOUR KNEES GENTLY, THEN RISE TALL.',
-    dose: { reps: 8 },
-  },
-  WSQ: {
-    name: 'WALL SQUATS', type: 'strength',
-    instruction: 'BACK AGAINST THE WALL. SLIDE DOWN A LITTLE AND HOLD.',
-    dose: { seconds: 20 },
-  },
-  PSQ: {
-    name: 'PARTIAL SQUATS', type: 'strength',
-    instruction: 'HOLD THE TABLE. BEND YOUR KNEES HALFWAY, THEN BACK UP.',
-    dose: { reps: 6 },
-  },
-  LSQ: {
-    name: 'LUNGE STEPS', type: 'strength',
-    instruction: 'HOLD THE CHAIR. STEP ONE FOOT FORWARD AND BEND GENTLY.',
-    dose: { reps: 5, perSide: true, betweenText: 'OTHER LEG' },
-  },
-  RKS: {
-    name: 'REVERSE KNEE LIFTS', type: 'strength',
-    instruction: 'HOLD THE CHAIR BACK. LIFT YOUR HEEL UP BEHIND YOU.',
-    dose: { reps: 8, perSide: true, betweenText: 'OTHER LEG' },
-  },
-  NST: {
-    name: 'NECK STRETCHES', type: 'mobility',
-    instruction: 'SIT TALL. TURN YOUR HEAD SLOWLY, SIDE TO SIDE.',
-    dose: { reps: 5, repSeconds: 3, perSide: true, betweenText: 'OTHER DIRECTION' },
-  },
-  SST: {
-    name: 'SHOULDER STRETCHES', type: 'mobility',
-    instruction: 'SIT TALL. PULL ONE ARM GENTLY ACROSS YOUR CHEST.',
-    dose: { reps: 5, perSide: true, betweenText: 'OTHER SIDE' },
-  },
-  HST: {
-    name: 'HIP STRETCHES', type: 'mobility',
-    instruction: 'SIT TALL. REST ONE ANKLE ON YOUR KNEE. LEAN FORWARD GENTLY.',
-    dose: { seconds: 30, perSide: true, betweenText: 'OTHER SIDE' },
-  },
-  CST: {
-    name: 'CALF STRETCHES', type: 'mobility',
-    instruction: 'HANDS ON THE WALL. STEP ONE FOOT BACK, HEEL DOWN.',
-    dose: { seconds: 20, perSide: true, betweenText: 'OTHER LEG' },
-  },
-  AST: {
-    name: 'OVERHEAD STRETCHES', type: 'mobility',
-    instruction: 'SIT TALL. REACH ONE ARM UP HIGH AND HOLD.',
-    dose: { seconds: 20, perSide: true, betweenText: 'OTHER ARM' },
   },
   OLB: {
     name: 'ONE-LEG BALANCE', type: 'balance',
@@ -256,236 +358,6 @@ const EXERCISES = {
     instruction: 'HOLD THE CHAIR. LIFT ONE LEG ACROSS IN FRONT OF THE OTHER.',
     dose: { reps: 8, perSide: true, betweenText: 'OTHER LEG' },
   },
-  TPU: {
-    name: 'TABLE PUSH-UPS', type: 'strength',
-    instruction: 'HANDS ON THE TABLE EDGE. LEAN IN, PUSH BACK.',
-    dose: { reps: 6 },
-  },
-  WPU: {
-    name: 'WIDE WALL PUSH-UPS', type: 'strength',
-    instruction: 'HANDS WIDE ON THE WALL. LEAN IN, PUSH BACK.',
-    dose: { reps: 8 },
-  },
-  TRO: {
-    name: 'CHAIR DIPS', type: 'strength',
-    instruction: 'HANDS ON THE CHAIR EDGE. BEND YOUR ELBOWS A LITTLE, PRESS BACK UP.',
-    dose: { reps: 6 },
-  },
-  ARC: {
-    name: 'ARM CIRCLES', type: 'strength',
-    instruction: 'HOLD THE CHAIR WITH ONE HAND. CIRCLE THE OTHER ARM SLOWLY.',
-    dose: { reps: 10, repSeconds: 3, perSide: true, betweenText: 'NOW THE OTHER WAY' },
-  },
-  WTW: {
-    name: 'WALL REACHES', type: 'strength',
-    instruction: 'STAND NEAR THE WALL. REACH UP, DOWN, AND OUT TO THE SIDE.',
-    dose: { reps: 8, perSide: true, betweenText: 'CHANGE DIRECTION' },
-  },
-  CRL: {
-    name: 'WALL ROLLS', type: 'strength',
-    instruction: 'HANDS ON THE WALL. ROLL YOUR SHOULDERS AND CHEST SLOWLY.',
-    dose: { reps: 10 },
-  },
-  SHR: {
-    name: 'SHOULDER ROLLS', type: 'strength',
-    instruction: 'STAND TALL. ROLL YOUR SHOULDERS SLOWLY.',
-    dose: { reps: 10, repSeconds: 2, perSide: true, betweenText: 'NOW BACKWARD' },
-  },
-  BDC: {
-    name: 'BELLY BREATHING', type: 'breathing',
-    instruction: 'SIT TALL. HAND ON YOUR BELLY. BREATHE SLOW AND DEEP.',
-    dose: { reps: 10 },
-  },
-  BOX: {
-    name: 'BOX BREATHING', type: 'breathing',
-    instruction: 'BREATHE IN, HOLD, OUT, HOLD. FOUR SLOW COUNTS EACH.',
-    dose: { reps: 5 },
-  },
-  PSB: {
-    name: 'PURSED-LIP BREATHING', type: 'breathing',
-    instruction: 'BREATHE IN THROUGH YOUR NOSE. OUT SLOWLY THROUGH PURSED LIPS.',
-    dose: { reps: 10 },
-  },
-  BAW: {
-    name: 'BREATH AND ARM WAVES', type: 'breathing',
-    instruction: 'BREATHE IN, ARMS FLOAT UP. BREATHE OUT, ARMS FLOAT DOWN.',
-    dose: { seconds: 20 },
-  },
-  SFR: {
-    name: 'SIT FROM FLOOR', type: 'skill',
-    instruction: 'USING THE BED, LOWER DOWN TO SIT ON THE FLOOR, THEN BACK UP.',
-    dose: { reps: 2 },
-  },
-  GSR: {
-    name: 'GET-UP REVIEW', type: 'skill',
-    instruction: 'ONE SLOW WALK-THROUGH OF YOUR WAY UP FROM THE FLOOR.',
-    dose: { cycles: 1, stepSeconds: 12, steps: FR_STEPS },
-  },
-  FR2: {
-    name: 'KNEEL TO STAND', type: 'skill',
-    instruction: 'HOLD THE CHAIR. KNEEL DOWN THEN PRESS BACK UP TO STANDING.',
-    dose: { cycles: 2, stepSeconds: 10, steps: [
-      'HOLD THE CHAIR SEAT. LOWER SLOWLY TO KNEELING.',
-      'BRING ONE FOOT FORWARD, FLAT ON THE FLOOR.',
-      'HANDS ON CHAIR ARMS. PRESS UP TO STANDING.',
-    ]},
-  },
-  FR3: {
-    name: 'FULL FLOOR TO STAND', type: 'skill',
-    instruction: 'BACKWARD-CHAINED PRACTICE. WE BUILD FROM THE LAST STEP FIRST.',
-    dose: { cycles: 2, stepSeconds: 12, steps: [
-      'STAND NEAR THE WALL. LOWER TO HALF-KNEEL.',
-      'SIT DOWN TO THE FLOOR. TAKE YOUR TIME.',
-      'ROLL ONTO YOUR SIDE. EASY.',
-      'PRESS UP TO SEATED. HANDS ON WALL.',
-      'COME UP TO KNEELING.',
-      'STEP ONE FOOT FORWARD. PUSH TO STANDING.',
-    ]},
-  },
-  FR4: {
-    name: 'CONTROLLED LOWERING', type: 'skill',
-    instruction: 'HOLD THE CHAIR ARMS. LOWER YOURSELF DOWN TO SEATED. NICE AND SLOW.',
-    dose: { reps: 5 },
-  },
-  FR5: {
-    name: 'SIDE-LIE TO SEATED', type: 'skill',
-    instruction: 'LIE ON YOUR SIDE ON THE BED. PRESS UP TO SEATED USING YOUR ARMS.',
-    dose: { reps: 3 },
-  },
-  FR6: {
-    name: 'FOUR-POINT HOLD', type: 'skill',
-    instruction: 'ON HANDS AND KNEES ON THE MAT. HOLD STEADY AND BREATHE.',
-    dose: { seconds: 15 },
-  },
-  FR7: {
-    name: 'BEAR CRAWL TO BED', type: 'skill',
-    instruction: 'ON ALL FOURS ON THE MAT. WALK YOUR HANDS TOWARD THE BED.',
-    dose: { reps: 3 },
-  },
-  FR8: {
-    name: 'FORWARD STAGGER STEP', type: 'skill',
-    instruction: 'STEP FORWARD AND CATCH YOURSELF. CONTROL THE STEP, THEN RECOVER.',
-    dose: { reps: 5 },
-  },
-  FR9: {
-    name: 'BACKWARD STAGGER STEP', type: 'skill',
-    instruction: 'STEP BACKWARD AND CATCH YOURSELF. STAY IN CONTROL.',
-    dose: { reps: 5 },
-  },
-  FR10: {
-    name: 'SIDEWAYS STAGGER STEP', type: 'skill',
-    instruction: 'STEP TO THE SIDE AND CATCH YOURSELF. CONTROL THE MOVEMENT.',
-    dose: { reps: 5, perSide: true, betweenText: 'OTHER SIDE' },
-  },
-  FR11: {
-    name: 'SWAY AND CATCH', type: 'skill',
-    instruction: 'STAND AT THE COUNTER. SWAY FORWARD THEN CATCH YOURSELF.',
-    dose: { reps: 5 },
-  },
-  FR12: {
-    name: 'HALF-KNEEL TO STAND', type: 'skill',
-    instruction: 'HOLD THE COUNTER. LOWER TO HALF-KNEEL, THEN PUSH BACK UP TO STANDING.',
-    dose: { reps: 3 },
-  },
-  FR13: {
-    name: 'LOG ROLL PRACTICE', type: 'skill',
-    instruction: 'LIE ON THE BED. ROLL SLOWLY FROM YOUR BACK TO YOUR SIDE AND BACK.',
-    dose: { reps: 4 },
-  },
-  FR14: {
-    name: 'REACH PHONE FROM FLOOR', type: 'skill',
-    instruction: 'PRACTICE GETTING DOWN AND REACHING YOUR PHONE. THEN BACK UP.',
-    dose: { cycles: 1, stepSeconds: 15, steps: [
-      'LOWER TO THE FLOOR USING THE BED. SLOW AND STEADY.',
-      'REACH OUT FOR YOUR PHONE. NICE AND CONTROLLED.',
-      'PRESS BACK UP TO SITTING USING THE BED.',
-    ]},
-  },
-  FR15: {
-    name: 'CHAIR SCOOT TO RISE', type: 'skill',
-    instruction: 'SIT AT THE CHAIR EDGE. SCOOT FORWARD. THEN STAND.',
-    dose: { reps: 5 },
-  },
-  FR16: {
-    name: 'PUSH-UP RISE FROM CUSHION', type: 'skill',
-    instruction: 'ON A LOW CUSHION. TWO HANDS DOWN. PUSH YOURSELF UP.',
-    dose: { reps: 3 },
-  },
-  FR17: {
-    name: 'RECOVERY STEP WITH RAIL', type: 'skill',
-    instruction: 'HOLD THE RAIL. TAKE A BIG RECOVERY STEP AND CATCH YOURSELF.',
-    dose: { reps: 5 },
-  },
-  FR18: {
-    name: 'CONTROLLED KNEE LOWER', type: 'skill',
-    instruction: 'LET YOUR KNEES LOWER SLOWLY TO THE PADDED MAT. IN CONTROL.',
-    dose: { reps: 3 },
-  },
-  FR19: {
-    name: 'RISE FROM SOFT COUCH', type: 'skill',
-    instruction: 'SCOOT FORWARD TO THE COUCH EDGE. THEN PUSH UP TO STANDING.',
-    dose: { reps: 5 },
-  },
-  FR20: {
-    name: 'GET-UP VIA BOTTOM STAIR', type: 'skill',
-    instruction: 'USE THE BOTTOM STAIR AS YOUR STEP. HANDS ON THE RAIL. PUSH UP.',
-    dose: { reps: 3 },
-  },
-  FR21: {
-    name: 'REACH AND RECOVER', type: 'skill',
-    instruction: 'HOLD THE COUNTER. REACH OUT. THEN PULL YOURSELF BACK TO UPRIGHT.',
-    dose: { reps: 5 },
-  },
-  FR22: {
-    name: "GOLFER'S PICKUP", type: 'skill',
-    instruction: 'HOLD THE COUNTER. REACH DOWN AS ONE LEG LIFTS BACK. PICK IT UP.',
-    dose: { reps: 5 },
-  },
-  FR23: {
-    name: 'LOW-LIGHT GET-UP', type: 'skill',
-    instruction: 'EYES MOSTLY CLOSED. FEEL YOUR WAY FROM THE BED USING YOUR HANDS.',
-    dose: { cycles: 2, stepSeconds: 12, steps: [
-      'SIT ON THE BED EDGE. EYES HALF-CLOSED.',
-      'FEET FLAT ON THE FLOOR. FEEL FOR THE GROUND.',
-      'HANDS ON THE BED. LOWER TO KNEELING.',
-      'FEEL FOR THE BED EDGE. PRESS BACK UP TO STANDING.',
-    ]},
-  },
-  FR24: {
-    name: 'WEIGHT-SHIFT ON PAD', type: 'skill',
-    instruction: 'STAND ON THE FOAM PAD. SHIFT YOUR WEIGHT SLOWLY SIDE TO SIDE.',
-    dose: { seconds: 30 },
-  },
-  FR25: {
-    name: 'FREEZE AND ASSESS', type: 'skill',
-    instruction: 'STEP OUT AND STUMBLE SLIGHTLY. FREEZE. CHECK YOUR BALANCE BEFORE MOVING.',
-    dose: { reps: 5 },
-  },
-  FR26: {
-    name: 'FULL GET-UP TIMED', type: 'skill',
-    instruction: "ONE FULL GET-UP FROM THE FLOOR. YOUR WAY. YOUR TIME. LET'S SEE IT.",
-    dose: { cycles: 1, stepSeconds: 12, steps: FR_STEPS },
-  },
-  CS: {
-    name: 'CALF STRETCH', type: 'mobility',
-    instruction: 'HANDS ON THE WALL. ONE FOOT BACK, HEEL FLAT. HOLD THE STRETCH.',
-    dose: { seconds: 20, perSide: true, betweenText: 'OTHER LEG' },
-  },
-  HAB: {
-    name: 'HIP ABDUCTION', type: 'strength',
-    instruction: 'HOLD THE COUNTER. LIFT ONE LEG OUT TO THE SIDE. SLOW AND CONTROLLED.',
-    dose: { reps: 8, perSide: true, betweenText: 'OTHER LEG' },
-  },
-  HE: {
-    name: 'HIP EXTENSION', type: 'strength',
-    instruction: 'HOLD THE COUNTER. GENTLY LIFT ONE LEG BACK. SLOW AND EASY.',
-    dose: { reps: 8, perSide: true, betweenText: 'OTHER LEG' },
-  },
-  SMB: {
-    name: 'SEATED HIGH MARCH', type: 'strength',
-    instruction: 'SIT TALL. MARCH YOUR KNEES UP AS HIGH AS FEELS GOOD. SLOW AND STEADY.',
-    dose: { seconds: 30 },
-  },
   STW: {
     name: 'TANDEM WALK', type: 'balance',
     instruction: 'HOLD THE COUNTER. WALK FORWARD, ONE FOOT DIRECTLY IN FRONT OF THE OTHER.',
@@ -496,10 +368,67 @@ const EXERCISES = {
     instruction: 'HOLD THE COUNTER. GENTLY LIFT ONE FOOT. FIND YOUR BALANCE.',
     dose: { seconds: 10, perSide: true, betweenText: 'OTHER LEG' },
   },
-  STSp: {
-    name: 'SIT-STAND WITH PAUSE', type: 'strength',
-    instruction: 'RISE FROM THE CHAIR. PAUSE HALFWAY. THEN RISE ALL THE WAY.',
-    dose: { reps: 6 },
+  WSS: {
+    name: 'WEIGHT SHIFT SIDEWAYS', type: 'balance',
+    instruction: 'HOLD THE COUNTER. SHIFT YOUR WEIGHT SLOWLY FROM LEFT TO RIGHT.',
+    dose: { seconds: 30 },
+  },
+  WSF: {
+    name: 'WEIGHT SHIFT FRONT-BACK', type: 'balance',
+    instruction: 'HOLD THE COUNTER. ROCK GENTLY FORWARD THEN BACK.',
+    dose: { seconds: 30 },
+  },
+  THR: {
+    name: 'TOE-HEEL ROCK', type: 'balance',
+    instruction: 'HOLD THE COUNTER. RISE ON YOUR TOES, THEN ROCK BACK ON YOUR HEELS.',
+    dose: { reps: 12 },
+  },
+  F8: {
+    name: 'FIGURE-8 WEIGHT SHIFT', type: 'balance',
+    instruction: 'HOLD THE COUNTER. TRACE A SLOW FIGURE-8 PATTERN WITH YOUR WEIGHT.',
+    dose: { seconds: 30 },
+  },
+  CLK: {
+    name: 'CLOCK STEPS', type: 'balance',
+    instruction: 'HOLD THE COUNTER. STEP OUT LIKE THE HANDS OF A CLOCK. FRONT, DIAGONAL, SIDE, BACK. RETURN EACH TIME.',
+    dose: { reps: 6, perSide: true, betweenText: 'OTHER LEG' },
+  },
+
+  // ---- warm-up mobility ----
+  AC: {
+    name: 'ANKLE CIRCLES', type: 'mobility',
+    instruction: 'SIT TALL. CIRCLE YOUR ANKLES, SLOW AND EASY.',
+    dose: { reps: 10, repSeconds: 3, perSide: true, betweenText: 'OTHER DIRECTION' },
+  },
+  NST: {
+    name: 'NECK STRETCHES', type: 'mobility',
+    instruction: 'SIT TALL. TURN YOUR HEAD SLOWLY, SIDE TO SIDE.',
+    dose: { reps: 5, repSeconds: 3, perSide: true, betweenText: 'OTHER DIRECTION' },
+  },
+  SST: {
+    name: 'SHOULDER STRETCHES', type: 'mobility',
+    instruction: 'SIT TALL. PULL ONE ARM GENTLY ACROSS YOUR CHEST.',
+    dose: { reps: 5, perSide: true, betweenText: 'OTHER SIDE' },
+  },
+  HST: {
+    name: 'HIP STRETCHES', type: 'mobility',
+    instruction: 'SIT TALL. REST ONE ANKLE ON YOUR KNEE. LEAN FORWARD GENTLY.',
+    dose: { seconds: 30, perSide: true, betweenText: 'OTHER SIDE' },
+  },
+  CST: {
+    name: 'CALF STRETCHES', type: 'mobility',
+    instruction: 'HANDS ON THE WALL. STEP ONE FOOT BACK, HEEL DOWN.',
+    dose: { seconds: 20, perSide: true, betweenText: 'OTHER LEG' },
+  },
+  AST: {
+    name: 'OVERHEAD STRETCHES', type: 'mobility',
+    instruction: 'SIT TALL. REACH ONE ARM UP HIGH AND HOLD.',
+    dose: { seconds: 20, perSide: true, betweenText: 'OTHER ARM' },
+  },
+  CS: {
+    name: 'CALF STRETCH', type: 'mobility',
+    instruction: 'HANDS ON THE WALL. ONE FOOT BACK, HEEL FLAT. HOLD THE STRETCH.',
+    dose: { seconds: 20, perSide: true, betweenText: 'OTHER LEG' },
   },
   WS: {
     name: 'WALL SLIDES', type: 'mobility',
@@ -521,97 +450,120 @@ const EXERCISES = {
     instruction: 'SIT TALL, ARMS FOLDED. TWIST GENTLY TO ONE SIDE, THEN THE OTHER.',
     dose: { reps: 6, perSide: true, betweenText: 'OTHER SIDE' },
   },
-  WSS: {
-    name: 'WEIGHT SHIFT SIDEWAYS', type: 'balance',
-    instruction: 'HOLD THE COUNTER. SHIFT YOUR WEIGHT SLOWLY FROM LEFT TO RIGHT.',
-    dose: { seconds: 30 },
-  },
-  WSF: {
-    name: 'WEIGHT SHIFT FRONT-BACK', type: 'balance',
-    instruction: 'HOLD THE COUNTER. ROCK GENTLY FORWARD THEN BACK.',
-    dose: { seconds: 30 },
-  },
-  THR: {
-    name: 'TOE-HEEL ROCK', type: 'balance',
-    instruction: 'HOLD THE COUNTER. RISE ON YOUR TOES, THEN ROCK BACK ON YOUR HEELS.',
-    dose: { reps: 12 },
-  },
-  GS: {
-    name: 'GRIP SQUEEZE', type: 'strength',
-    instruction: 'SQUEEZE THE BALL IN YOUR HAND, HOLD A MOMENT, THEN RELAX.',
-    dose: { reps: 10 },
-  },
-  FC: {
-    name: "FARMER'S CARRY", type: 'strength',
-    instruction: 'HOLD SOMETHING LIGHT IN EACH HAND. WALK SLOWLY ACROSS THE ROOM AND BACK.',
-    dose: { seconds: 30 },
-  },
-  SU: {
-    name: 'STEP-UPS', type: 'strength',
-    instruction: 'HOLD THE RAIL. STEP UP ONTO THE LOW STEP. STEP BACK DOWN.',
-    dose: { reps: 6, perSide: true, betweenText: 'OTHER LEG' },
-  },
   CY: {
     name: 'CHAIR CAT-COW', type: 'mobility',
     instruction: 'SIT TALL. ARCH YOUR BACK AND LOOK UP, THEN ROUND IT AND LOOK DOWN.',
     dose: { reps: 8 },
-  },
-  HS: {
-    name: 'HAMSTRING STRETCH', type: 'mobility',
-    instruction: 'SIT AT THE CHAIR EDGE. STRAIGHTEN ONE LEG, LEAN FORWARD GENTLY.',
-    dose: { seconds: 20, perSide: true, betweenText: 'OTHER LEG' },
-  },
-  QS: {
-    name: 'QUAD STRETCH', type: 'mobility',
-    instruction: 'HOLD THE WALL. LIFT YOUR HEEL BEHIND YOU, KNEES TOGETHER. HOLD.',
-    dose: { seconds: 20, perSide: true, betweenText: 'OTHER LEG' },
   },
   RD: {
     name: 'REACH DRILL', type: 'mobility',
     instruction: 'HOLD THE COUNTER. REACH UP HIGH AND ACROSS YOUR BODY, BOTH SIDES.',
     dose: { reps: 6, perSide: true, betweenText: 'OTHER SIDE' },
   },
-  F8: {
-    name: 'FIGURE-8 WEIGHT SHIFT', type: 'balance',
-    instruction: 'HOLD THE COUNTER. TRACE A SLOW FIGURE-8 PATTERN WITH YOUR WEIGHT.',
-    dose: { seconds: 30 },
+  SHR: {
+    name: 'SHOULDER ROLLS', type: 'mobility',
+    instruction: 'STAND TALL. ROLL YOUR SHOULDERS SLOWLY.',
+    dose: { reps: 10, repSeconds: 2, perSide: true, betweenText: 'NOW BACKWARD' },
+  },
+
+  // ---- cooldown / breathing ----
+  SB: {
+    name: 'EASY BREATHING', type: 'cooldown',
+    instruction: 'SIT TALL. BREATHE SLOW AND DEEP.',
+    dose: { seconds: 60 },
+  },
+  BDC: {
+    name: 'BELLY BREATHING', type: 'breathing',
+    instruction: 'SIT TALL. HAND ON YOUR BELLY. BREATHE SLOW AND DEEP.',
+    dose: { reps: 10 },
+  },
+  BOX: {
+    name: 'BOX BREATHING', type: 'breathing',
+    instruction: 'BREATHE IN, HOLD, OUT, HOLD. FOUR SLOW COUNTS EACH.',
+    dose: { reps: 5 },
+  },
+  PSB: {
+    name: 'PURSED-LIP BREATHING', type: 'breathing',
+    instruction: 'BREATHE IN THROUGH YOUR NOSE. OUT SLOWLY THROUGH PURSED LIPS.',
+    dose: { reps: 10 },
+  },
+  BAW: {
+    name: 'BREATH AND ARM WAVES', type: 'breathing',
+    instruction: 'BREATHE IN, ARMS FLOAT UP. BREATHE OUT, ARMS FLOAT DOWN.',
+    dose: { seconds: 20 },
+  },
+  HS: {
+    name: 'HAMSTRING STRETCH', type: 'mobility',
+    instruction: 'SIT AT THE CHAIR EDGE. STRAIGHTEN ONE LEG, LEAN FORWARD GENTLY.',
+    dose: { seconds: 20, perSide: true, betweenText: 'OTHER LEG' },
   },
   BB: {
     name: 'BOX BREATHING', type: 'cooldown',
     instruction: 'IN FOUR COUNTS. HOLD FOUR. OUT FOUR. HOLD FOUR. SLOW AND EASY.',
     dose: { seconds: 60 },
   },
-  HK: {
-    name: 'HIGH-KNEE MARCH', type: 'balance',
-    instruction: 'HOLD THE COUNTER. MARCH IN PLACE, LIFTING YOUR KNEES AS HIGH AS FEELS GOOD.',
-    dose: { seconds: 30 },
-  },
   CD: {
     name: 'FULL-BODY STRETCH', type: 'cooldown',
     instruction: 'STAND AGAINST THE WALL. REACH TALL AND STRETCH YOUR WHOLE BODY OUT.',
     dose: { seconds: 60 },
   },
-  SCR: {
-    name: 'SEATED CALF RAISES', type: 'strength',
-    instruction: 'SIT TALL. RISE UP ON YOUR TOES AS HIGH AS YOU CAN. LOWER SLOWLY.',
-    dose: { reps: 12 },
+
+  // ---- FLOOR LADDER: chair -> bed -> floor, one stage per session ----
+  // Each stage is unlocked by 3 sessions that felt EASY or JUST RIGHT.
+  // "TOO HARD / KNEE HURT" drops back one stage. Nothing here asks him to
+  // kneel on a bare floor; stages 6-7 use a padded mat + the bed as support.
+  L1: {
+    name: 'CHAIR RISE, HANDS HELP', type: 'ladder', stage: 1,
+    instruction: 'SCOOT TO THE CHAIR EDGE. FEET BACK. LEAN FORWARD. PUSH WITH YOUR HANDS AND STAND.',
+    dose: { reps: 8, repSeconds: 4 },
   },
-  WDS: {
-    name: 'WIDE STANCE SQUAT', type: 'strength',
-    instruction: 'HOLD THE COUNTER. FEET WIDE APART. BEND YOUR KNEES GENTLY AND RISE.',
-    dose: { reps: 8 },
+  L2: {
+    name: 'CHAIR RISE, NO HANDS', type: 'ladder', stage: 2,
+    instruction: 'ARMS CROSSED. NOSE OVER TOES. STAND UP. SIT BACK DOWN SLOWLY.',
+    dose: { reps: 8, repSeconds: 4 },
   },
-  TKE: {
-    name: 'TERMINAL KNEE EXTENSION', type: 'strength',
-    instruction: 'HOLD THE CHAIR BACK. SLIGHT BEND IN YOUR KNEE. SLOWLY STRAIGHTEN IT FULLY. SQUEEZE AT THE TOP.',
-    dose: { reps: 10, perSide: true, betweenText: 'OTHER LEG' },
+  L3: {
+    name: 'LOW SEAT RISE', type: 'ladder', stage: 3,
+    instruction: 'SIT ON THE BED EDGE. LEAN FORWARD. STAND UP. HANDS MAY HELP. SIT BACK DOWN SLOWLY.',
+    dose: { reps: 6, repSeconds: 5 },
   },
-  CLK: {
-    name: 'CLOCK STEPS', type: 'balance',
-    instruction: 'HOLD THE COUNTER. STEP OUT LIKE THE HANDS OF A CLOCK. FRONT, DIAGONAL, SIDE, BACK. RETURN EACH TIME.',
-    dose: { reps: 6, perSide: true, betweenText: 'OTHER LEG' },
+  L4: {
+    name: 'SLOW LOWERING', type: 'ladder', stage: 4,
+    instruction: 'HAND ON THE COUNTER. LOWER SLOWLY ONTO THE BED EDGE. TAKE FOUR SECONDS.',
+    dose: { reps: 6, repSeconds: 6 },
+  },
+  L5: {
+    name: 'CUSHION SEAT RISE', type: 'ladder', stage: 5,
+    instruction: 'FIRM CUSHIONS BESIDE THE BED. SIT ON THEM. HANDS ON THE BED. PUSH UP TO STAND.',
+    dose: { reps: 4, repSeconds: 8 },
+  },
+  L6: {
+    name: 'FLOOR SIT AND BED RISE', type: 'ladder', stage: 6,
+    instruction: 'PHONE IN YOUR POCKET. A SOFT MAT BESIDE THE BED. WE GO ONE STEP AT A TIME.',
+    dose: { cycles: 2, stepSeconds: 15, ownAudio: true, steps: [
+      'PHONE IN YOUR POCKET. STAND BESIDE THE BED.',
+      'HANDS ON THE BED. LOWER SLOWLY TO SIT ON THE MAT.',
+      'REST HERE. BREATHE. FEET FLAT, KNEES BENT.',
+      'TURN SIDEWAYS. BOTH HANDS ON THE BED.',
+      'PUSH DOWN. LIFT YOUR HIPS ONTO THE BED EDGE.',
+      'REST SITTING. THEN STAND TALL.',
+    ]},
+  },
+  L7: {
+    name: 'FULL FLOOR RISE', type: 'ladder', stage: 7,
+    instruction: 'THE WHOLE JOURNEY, ON THE MAT BESIDE THE BED. ANY SHARP KNEE PAIN, STOP AND USE THE BED SEAT.',
+    dose: { cycles: 2, stepSeconds: 15, ownAudio: true, steps: [
+      'PHONE IN YOUR POCKET. SIT ON THE MAT BESIDE THE BED.',
+      'ROLL TO YOUR SIDE. THEN ONTO HANDS AND KNEES ON THE PAD.',
+      'CRAWL TO THE BED. HANDS FLAT ON THE BED.',
+      'STRONGER FOOT FLAT ON THE FLOOR.',
+      'PUSH WITH YOUR HANDS AND FOOT. STAND TALL.',
+    ]},
   },
 };
+
+const LADDER_LAST = 7;
+const LADDER_NEEDED = 3; // good sessions in a row to unlock the next stage
 
 function getDose(id) {
   const base = EXERCISES[id].dose;
@@ -624,67 +576,62 @@ function getDose(id) {
 
 // ---------------------------------------------------------------- flavors
 
+const CARDIO_IDS = ['BRM', 'SBX', 'SJK', 'SSS', 'HDG', 'SMB', 'HK', 'WLK'];
+const CORE_IDS = ['CTP', 'BRC', 'SEK', 'SBD', 'SCH', 'PTL', 'SKL'];
 const BALANCE_IDS = [
-  'MIP', 'TS', 'HTW', 'OLB', 'FBW', 'SBW', 'TND', 'CBL',
-  'STW', 'SLS', 'WSS', 'WSF', 'THR', 'F8', 'HK', 'CLK',
+  'TS', 'HTW', 'OLB', 'FBW', 'SBW', 'TND', 'CBL',
+  'STW', 'SLS', 'WSS', 'WSF', 'THR', 'F8', 'CLK',
 ];
 const STRENGTH_IDS = [
-  'STS', 'HR', 'TR', 'SLR', 'KE', 'HB', 'WP',
-  'CKS', 'WSQ', 'PSQ', 'LSQ', 'RKS',
-  'TPU', 'WPU', 'TRO', 'ARC', 'WTW', 'CRL', 'SHR',
-  'HAB', 'HE', 'SMB', 'STSp', 'GS', 'FC', 'SU',
-  'SCR', 'WDS', 'TKE',
+  'STS', 'STSp', 'KE', 'QSQ', 'TKE', 'CKS', 'PSQ', 'WDS', 'HB', 'CPU',
+  'HR', 'SCR', 'TR', 'SLR', 'HAB', 'HE', 'RKS',
+  'WP', 'WPU', 'TPU', 'ARC', 'WTW', 'CRL',
 ];
 const WARMUP_MOBILITY_IDS = [
   'AC', 'NST', 'SST', 'HST', 'CST', 'AST',
   'CS', 'NR', 'SR', 'WS', 'CY', 'TT', 'RD',
 ];
-const WARMUP_MOVEMENT_IDS = ['MIP', 'FBW', 'SBW', 'SHR', 'ARC', 'HK'];
-const COOLDOWN_BREATHING_IDS = ['SB', 'BDC', 'BOX', 'PSB', 'BAW', 'BB', 'CD', 'HS', 'QS'];
+const WARMUP_MOVEMENT_IDS = ['MIP', 'FBW', 'SBW', 'SHR', 'ARC'];
+const COOLDOWN_IDS = ['SB', 'BDC', 'BOX', 'PSB', 'BAW', 'BB', 'CD', 'HS'];
 
-const SKILL_POOL = [
-  'FR', 'FR', 'FR', 'FR',
-  'FR2', 'FR3', 'FR4', 'FR5', 'FR6', 'FR7', 'FR8', 'FR9', 'FR10',
-  'FR11', 'FR12', 'FR13', 'FR14', 'FR15', 'FR16', 'FR17', 'FR18',
-  'FR19', 'FR20', 'FR21', 'FR22', 'FR23', 'FR24', 'FR25', 'FR26',
-  'SFR', 'GSR',
-];
-
+// `mix` = how many body exercises of each kind. Every session also gets a
+// 2-exercise warm-up, one floor-ladder stage, and a cooldown (~11 exercises,
+// roughly 20-25 minutes). `fr` flavors add a review of the previous stage.
 const FLAVORS = [
   {
-    name: 'STEADY LEGS', balanceRatio: 0.6,
+    name: 'BELLY BURNER', mix: { cardio: 3, core: 2, strength: 2, balance: 0 },
     weights: {
-      TS: 3, HTW: 3, OLB: 3, TND: 2, FBW: 2, SBW: 2, CBL: 2, MIP: 2, STS: 2, SLR: 2, CKS: 2, LSQ: 2,
-      STW: 3, SLS: 3, WSS: 2, WSF: 2, THR: 3, F8: 2, HK: 2, STSp: 2, HAB: 2, HE: 2,
-      CLK: 3, TKE: 2, SCR: 2, WDS: 2,
+      BRM: 3, SBX: 3, SJK: 2, SSS: 3, HDG: 2, SMB: 2, HK: 2, WLK: 3,
+      CTP: 3, BRC: 2, SEK: 3, SBD: 2, SCH: 3, SKL: 2,
+      STS: 3, HB: 2, CKS: 2, HAB: 2, HE: 2,
     },
   },
   {
-    name: 'STRONG SIT', balanceRatio: 0.4,
+    name: 'STRONG KNEES', mix: { cardio: 1, core: 1, strength: 4, balance: 1 },
     weights: {
-      STS: 3, KE: 3, CKS: 3, PSQ: 2, SLR: 2, HB: 2, TRO: 1, RKS: 2,
-      STSp: 3, SMB: 2, GS: 1, HR: 2, TR: 2, OLB: 2, TS: 2,
-      TKE: 3, SCR: 2, WDS: 2,
+      TKE: 4, QSQ: 4, KE: 3, STS: 3, STSp: 3, CKS: 2, PSQ: 2, HB: 2, HR: 2, SCR: 2, WDS: 2,
+      SMB: 3, SSS: 2, BRC: 2, OLB: 2, TS: 2,
     },
   },
   {
-    name: 'TALL & PROUD', balanceRatio: 0.5,
+    name: 'GET UP & GO', mix: { cardio: 2, core: 1, strength: 3, balance: 0 }, fr: true,
     weights: {
-      WP: 1, WPU: 1, HR: 3, HTW: 3, TPU: 1, TR: 3, WSQ: 2, WTW: 1, CRL: 1, ARC: 2, SHR: 2,
-      WS: 2, STW: 2, SU: 3, HAB: 2, OLB: 2, TS: 2,
-      SCR: 3, TKE: 2, WDS: 2, CLK: 2,
+      STS: 3, CPU: 4, HB: 3, STSp: 3, TKE: 2, QSQ: 2, KE: 2, CKS: 2,
+      SEK: 2, BRC: 2, BRM: 2, SBX: 2, WP: 2, WPU: 2,
     },
   },
   {
-    name: 'GROUND SCHOOL', balanceRatio: 0.35, fr: true,
-    weights: { HB: 2, STS: 2, CKS: 2, PSQ: 2, STSp: 2, SMB: 2, KE: 3, SU: 2, OLB: 2, TKE: 3, WDS: 2 },
+    name: 'STEADY LEGS', mix: { cardio: 1, core: 1, strength: 2, balance: 3 },
+    weights: {
+      TS: 3, HTW: 3, OLB: 3, SLS: 2, STW: 3, CLK: 3, TND: 2, THR: 2, F8: 2, WSS: 2, WSF: 2,
+      TKE: 2, STS: 2, HAB: 2, HE: 2, SMB: 2, SSS: 2,
+    },
   },
   {
-    name: 'THE WALKABOUT', balanceRatio: 0.6,
+    name: 'THE WALKABOUT', mix: { cardio: 3, core: 1, strength: 2, balance: 1 },
     weights: {
-      MIP: 3, HTW: 3, TND: 3, FBW: 2, SBW: 2, LSQ: 2, STS: 2, HR: 3, TR: 3,
-      STW: 3, HK: 3, SU: 3, HAB: 2, HE: 2, FC: 2, THR: 2,
-      CLK: 3, SCR: 2, WDS: 2,
+      WLK: 4, BRM: 3, SSS: 3, HDG: 3, HK: 2, HR: 3, TR: 3, STW: 3, HTW: 3,
+      STS: 2, CKS: 2, HAB: 2, HE: 2, SBD: 2,
     },
   },
 ];
@@ -730,12 +677,33 @@ const MILESTONES = [
 ];
 
 const FLAVOR_AUDIO = {
+  'BELLY BURNER': 'fl_belly',
+  'STRONG KNEES': 'fl_knees',
+  'GET UP & GO': 'fl_getup',
   'STEADY LEGS': 'fl_steady',
-  'STRONG SIT': 'fl_strongsit',
-  'TALL & PROUD': 'fl_tall',
-  'GROUND SCHOOL': 'fl_ground',
   'THE WALKABOUT': 'fl_walkabout',
 };
+
+// Shown once, the first time the app opens.
+const SAFETY_CARDS = [
+  'TALK TO YOUR DOCTOR BEFORE YOU START THIS PLAN.',
+  'EFFORT IS GOOD. SHARP KNEE PAIN IS NOT. IF YOU FEEL IT, STOP AND SIT.',
+  'BREATHE OUT ON THE HARD PART. NEVER HOLD YOUR BREATH.',
+  'KEEP YOUR PHONE IN YOUR POCKET.',
+];
+
+// One per session, in order. The belly only shrinks when eating changes too.
+const TIPS = [
+  'NO EXERCISE REMOVES BELLY FAT ALONE. MOVING PLUS EATING LESS DOES.',
+  'SMALLER PLATES. SLOWER BITES. STOP WHEN COMFORTABLY FULL.',
+  'PUT PROTEIN IN EVERY MEAL. IT KEEPS YOU FULL AND KEEPS YOUR MUSCLE.',
+  'WALK TEN MINUTES AFTER EACH MEAL.',
+  'NO SNACKING AFTER DINNER.',
+  'A GLASS OF WATER BEFORE EACH MEAL.',
+  'SWAP SWEET DRINKS FOR WATER OR TEA.',
+  'SLEEP SEVEN HOURS. TIRED BODIES HOLD ON TO BELLY FAT.',
+  'MEASURE YOUR WAIST AT THE NAVEL ONCE A MONTH. THE SCALE CAN LIE.',
+];
 
 const BETWEEN_AUDIO = {
   'OTHER LEG': 'b_other_leg',
@@ -819,7 +787,7 @@ function setScreen(html, wire) {
 
 // ---------------------------------------------------------------- progression
 
-const PROGRESSION_TYPES = { strength: true, balance: true, skill: true };
+const PROGRESSION_TYPES = { strength: true, balance: true, cardio: true, core: true };
 
 function progressExercise(id) {
   const ex = EXERCISES[id];
@@ -830,9 +798,10 @@ function progressExercise(id) {
   p.streakAtDose = (p.streakAtDose || 0) + 1;
   if (p.streakAtDose >= 3) {
     p.streakAtDose = 0;
-    const inc = kind === 'reps' ? 2 : 5;
-    const cap = kind === 'reps' ? 15 : 45;
-    p.currentDose = Math.min(cap, p.currentDose + inc);
+    // cardio steps 30 -> 45 -> 60s (those number clips exist); the rest +2 reps / +5s
+    const rule = ex.type === 'cardio' ? { inc: 15, cap: 60 }
+      : kind === 'reps' ? { inc: 2, cap: 15 } : { inc: 5, cap: 45 };
+    p.currentDose = Math.min(rule.cap, p.currentDose + rule.inc);
   }
   progressCache[id] = p;
 }
@@ -841,20 +810,47 @@ function progressExercise(id) {
 
 function composeSession(lengthMin, flavor) {
   const warmup = [pick(WARMUP_MOBILITY_IDS), pick(WARMUP_MOVEMENT_IDS)];
-  const notInWarmup = (id) => !warmup.includes(id);
-  const bodyN  = 3;
-  const picksN = bodyN - (flavor.fr ? 1 : 0);
-  const balanceN = Math.min(Math.round(picksN * flavor.balanceRatio), picksN - 1);
-  const strength = weightedSample(STRENGTH_IDS.filter(notInWarmup), flavor.weights, picksN - balanceN);
-  const balance  = weightedSample(BALANCE_IDS.filter(notInWarmup), flavor.weights, balanceN);
-  const body = shuffle([...strength, ...balance]);
-  const ids = [
-    ...warmup,
-    ...body,
-    ...(flavor.fr ? [pick(SKILL_POOL)] : []),
-    pick(COOLDOWN_BREATHING_IDS),
+  const used = new Set(warmup);
+  const take = (pool, n) => {
+    const got = weightedSample(pool.filter((id) => !used.has(id)), flavor.weights, n);
+    got.forEach((id) => used.add(id));
+    return got;
+  };
+  const m = flavor.mix;
+  const body = shuffle([
+    ...take(CARDIO_IDS, m.cardio),
+    ...take(STRENGTH_IDS, m.strength),
+    ...take(CORE_IDS, m.core),
+    ...take(BALANCE_IDS, m.balance),
+  ]);
+  // Floor ladder goes right after warm-up, while his legs are fresh.
+  const ladder = [];
+  if (flavor.fr && floorState.stage > 1) ladder.push({ id: 'L' + (floorState.stage - 1), review: true });
+  ladder.push({ id: 'L' + floorState.stage });
+  const entries = [
+    ...warmup.map((id) => ({ id })),
+    ...ladder,
+    ...body.map((id) => ({ id })),
+    { id: pick(COOLDOWN_IDS) },
   ];
-  return ids.map((id) => ({ id, ...EXERCISES[id], dose: getDose(id) }));
+  return entries.map((e) => ({ ...e, ...EXERCISES[e.id], dose: getDose(e.id) }));
+}
+
+// Called after a ladder stage. Returns 'up' | 'back' | 'same' | 'top'.
+function recordFeel(choice) {
+  let result = 'same';
+  if (choice === 'hard') {
+    floorState.streak = 0;
+    if (floorState.stage > 1) { floorState.stage--; result = 'back'; }
+  } else {
+    floorState.streak++;
+    if (floorState.streak >= LADDER_NEEDED) {
+      if (floorState.stage < LADDER_LAST) { floorState.stage++; floorState.streak = 0; result = 'up'; }
+      else result = 'top';
+    }
+  }
+  saveLocalState();
+  return result;
 }
 
 // ---------------------------------------------------------------- persistence
@@ -928,7 +924,26 @@ function showSplash() {
         if (tapped) return;
         tapped = true;
         stage.onclick = null;
-        launchConfetti(showTrail);
+        launchConfetti(firstRunDone() ? showTrail : () => showSafety(0));
+      };
+    }
+  );
+}
+
+function firstRunDone() {
+  try { return localStorage.getItem('mg_safety') === '1'; } catch (e) { return true; }
+}
+
+function showSafety(i) {
+  state = 'WELCOME';
+  audio.say(['safe' + (i + 1)]);
+  setScreen(
+    `<div class="tap-all"><div class="sub">${SAFETY_CARDS[i]}</div></div>`,
+    () => {
+      stage.querySelector('.tap-all').onclick = () => {
+        if (i + 1 < SAFETY_CARDS.length) return showSafety(i + 1);
+        try { localStorage.setItem('mg_safety', '1'); } catch (e) {}
+        showTrail();
       };
     }
   );
@@ -962,7 +977,7 @@ function showTrail() {
        <div class="sub">${distLine}</div>
      </div>`,
     () => {
-      stage.querySelector('.tap-all').onclick = () => showFlavor(15);
+      stage.querySelector('.tap-all').onclick = () => showFlavor(25);
     }
   );
 }
@@ -1126,9 +1141,8 @@ function runFloorRecovery(ex) {
 
   function showStep() {
     const text = d.steps[stepIdx];
-    const keys = ['fr_step' + (stepIdx + 1)];
+    const keys = [ex.id + '_s' + (stepIdx + 1)];
     if (stepIdx === 0 && cycle === 2) keys.unshift('fr_again');
-    audio.say(keys);
     setScreen(
       `<div class="grow">
          <div class="sub accent">ROUND ${cycle} OF ${d.cycles}</div>
@@ -1136,8 +1150,11 @@ function runFloorRecovery(ex) {
        </div>
        <button class="btn done-btn" id="done">NEXT</button>`,
       () => {
+        const seq = screenSeq;
         byId('done').onclick = advance;
-        after(T(d.stepSeconds * 1000), advance);
+        audio.say(keys).then(() => {
+          if (seq === screenSeq) after(T(d.stepSeconds * 1000), advance);
+        });
       }
     );
   }
@@ -1167,6 +1184,8 @@ function recordResult(ex) {
 }
 
 function afterExercise() {
+  const ex = currentEx();
+  if (ex.type === 'ladder' && !ex.review && !ex.felt) return showFeel(ex);
   session.idx++;
   if (session.idx >= session.plan.length) return showConfidence();
   if (!session.midShown && session.idx >= Math.ceil(session.plan.length / 2)) {
@@ -1174,6 +1193,40 @@ function afterExercise() {
     return showMidMessage();
   }
   showRest();
+}
+
+// After a floor-ladder stage: did it feel okay? Decides whether he moves up or back.
+function showFeel(ex) {
+  audio.say(['feel_q']);
+  setScreen(
+    `<button class="btn" data-c="easy">EASY</button>
+     <button class="btn" data-c="right">JUST RIGHT</button>
+     <button class="btn" data-c="hard">TOO HARD OR KNEE HURT</button>`,
+    () => {
+      stage.querySelectorAll('.btn').forEach((b) => {
+        b.onclick = () => {
+          ex.felt = true;
+          const result = recordFeel(b.dataset.c);
+          if (result === 'up') return showFloorMsg('NEW LEVEL.<br>WELL DONE.', 'lvl_up');
+          if (result === 'back') return showFloorMsg('NO PROBLEM. WE TAKE A STEP BACK. SLOW IS SAFE.', 'lvl_back');
+          if (b.dataset.c === 'hard') return showFloorMsg('NO PROBLEM. SLOW IS SAFE. IF YOUR KNEE STAYS SORE, CALL YOUR DOCTOR.', 'lvl_hard');
+          afterExercise();
+        };
+      });
+    }
+  );
+}
+
+function showFloorMsg(html, audioKey) {
+  audio.say([audioKey]).then(() => {});
+  setScreen(
+    `<div class="tap-all"><div class="sub accent">${html}</div></div>`,
+    () => {
+      const go = () => { clearTimer(); afterExercise(); };
+      stage.querySelector('.tap-all').onclick = go;
+      after(T(10000), go);
+    }
+  );
 }
 
 function showRest() {
@@ -1234,6 +1287,23 @@ function showConfidence() {
   audio.say(keys);
   setScreen(
     `<div class="tap-all"><div class="title-sm">${line}</div></div>`,
+    () => {
+      const next = () => { clearTimer(); showTip(); };
+      stage.querySelector('.tap-all').onclick = next;
+      after(T(30000), next);
+    }
+  );
+}
+
+function showTip() {
+  state = 'TIP';
+  const i = (trailSteps - 1 + TIPS.length) % TIPS.length;
+  audio.say(['tip' + (i + 1)]);
+  setScreen(
+    `<div class="tap-all">
+       <div class="sub accent">BELLY TIP</div>
+       <div class="sub">${TIPS[i]}</div>
+     </div>`,
     () => {
       const next = () => { clearTimer(); showMessage(); };
       stage.querySelector('.tap-all').onclick = next;
